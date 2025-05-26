@@ -1,66 +1,10 @@
 pipeline {
     agent any
 
-<<<<<<< HEAD
-      // Build & push images
-      services.each { svc ->
-        echo "→ Building & pushing ${svc}"
-        bat "docker build -t %DOCKER_USER%/${svc}:${IMAGE_TAG} ."
-        withCredentials([usernamePassword(
-          credentialsId: 'dockerhub-credentials',
-          usernameVariable: 'DOCKER_USER',
-          passwordVariable: 'DOCKER_PASS'
-        )]) {
-          bat """
-            docker login -u %DOCKER_USER% -p %DOCKER_PASS%
-            docker push %DOCKER_USER%/${svc}:${IMAGE_TAG}
-          """
-        }
-      }
-
-      // Deploy all manifests in k8s/ at once
-      echo "→ Applying all k8s manifests"
-      bat """
-        set KUBECONFIG=C:\\Users\\DELL\\.kube\\config
-        kubectl apply -f k8s/
-      """
-
-<<<<<<< HEAD
-      // Wait for each deployment to roll out
-      services.each { svc ->
-        echo "→ Waiting rollout of ${svc}"
-        bat "kubectl rollout status deployment/${svc}"
-      }
-=======
-                    services.each { service ->
-                        echo "Processing ${service}"
-
-                        // Build Docker image
-                        bat "docker build -f Dockerfile -t %DOCKER_USER%/${service}:${IMAGE_TAG} ."
-
-                        // Push to Docker Hub
-                        withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                            bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
-                            
-                            bat "docker push %DOCKER_USER%/${service}:${IMAGE_TAG}"
-                            
-                        }
-
-                        // Deploy to Kubernetes (only works if `kubectl` is installed and configured properly on Windows)
-                            bat "set KUBECONFIG=C:\\Users\\DELL\\.kube\\config && kubectl apply -f k8s\\${service}-deployment.yaml"
-
-                        // Verify Deployment
-                        bat "kubectl rollout status deployment/${service}"
-                    }
-                }
-            }
-        }
->>>>>>> 8b4c692 (Update jenkinsfile)
-=======
     environment {
         DOCKER_USER = 'imanebenabbou'
-        IMAGE_TAG = 'latest'
->>>>>>> 739d8b6 (update jenkinsfile 2)
+        IMAGE_TAG   = 'latest'
+        SERVICES    = "auth-service,dashboard,entreprise,gateway,mission-service,spacecraft,telemetry"
     }
 
     stages {
@@ -70,32 +14,41 @@ pipeline {
             }
         }
 
-        stage('Build, Push and Deploy Services') {
+        stage('Build & Push Images') {
             steps {
                 script {
-                    def services = ['auth-service', 'dashboard', 'entreprise', 'gateway', 'mission-service', 'spacecraft', 'telemetry']
-
-                    services.each { service ->
-                        echo "Processing ${service}"
-
-                        // Build Docker image
-                        bat "docker build -f Dockerfile -t %DOCKER_USER%/${service}:${IMAGE_TAG} ."
-
-                        // Push to Docker Hub
-                        withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                            bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
-                            
-                            bat "docker push %DOCKER_USER%/${service}:${IMAGE_TAG}"
-                            
-                        }
-                        withCredentials([file(
-                            credentialsId: 'kubeconfig-production',
-                            variable: 'KUBECONFIG'
-                        )]) {
+                    // Split SERVICES into a List
+                    def svcList = SERVICES.tokenize(',')
+                    withCredentials([usernamePassword(
+                        credentialsId: 'dockerhub-credentials',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
+                    )]) {
+                        svcList.each { service ->
+                            echo "Building and pushing ${service}"
                             bat """
-                                kubectl --kubeconfig="%KUBECONFIG%" apply -f k8s\\
+                                docker build -f Dockerfile -t %DOCKER_USER%/${service}:${IMAGE_TAG} . \\
+                                  && docker login -u %DOCKER_USER% -p %DOCKER_PASS% \\
+                                  && docker push %DOCKER_USER%/${service}:${IMAGE_TAG}
                             """
                         }
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    // Use your kubeconfig credential to drive kubectl
+                    withCredentials([file(
+                        credentialsId: 'kubeconfig-production',
+                        variable: 'KUBECONFIG'
+                    )]) {
+                        bat """
+                            echo Applying all Kubernetes manifests...
+                            kubectl --kubeconfig="%KUBECONFIG%" apply -f k8s\\
+                        """
                     }
                 }
             }

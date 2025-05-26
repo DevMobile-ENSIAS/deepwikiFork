@@ -13,34 +13,37 @@ pipeline {
             }
         }
 
-        stage('Build, Push and Deploy Services') {
+        stage('Build and Push Images') {
             steps {
                 script {
                     def services = ['auth-service', 'dashboard', 'entreprise', 'gateway', 'mission-service', 'spacecraft', 'telemetry']
-
-                    services.each { service ->
-                        echo "Processing ${service}"
-
-                        // Build Docker image
-                        bat "docker build -f Dockerfile -t %DOCKER_USER%/${service}:${IMAGE_TAG} ."
-
-                        // Push to Docker Hub
-                        withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
-                            bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
-                            
+                    
+                    // Login once
+                    withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                        bat "docker login -u %DOCKER_USER% -p %DOCKER_PASS%"
+                        
+                        // Build once, tag and push for each service
+                        services.each { service ->
+                            echo "Building and pushing ${service}"
+                            bat "docker build -f Dockerfile -t %DOCKER_USER%/${service}:${IMAGE_TAG} ."
                             bat "docker push %DOCKER_USER%/${service}:${IMAGE_TAG}"
-                            
                         }
-                        withCredentials([file(
-                            credentialsId: 'kubeconfig-production',
-                            variable: 'KUBECONFIG'
-                        )]) {
-                            
-                            bat """
-                                kubectl --kubeconfig="%KUBECONFIG%" apply -f k8s/
-                            """
-                            
-                        }
+                    }
+                }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    // Apply k8s files only once
+                    withCredentials([file(
+                        credentialsId: 'kubeconfig-production',
+                        variable: 'KUBECONFIG'
+                    )]) {
+                        bat """
+                            kubectl --kubeconfig="%KUBECONFIG%" apply -f k8s/
+                        """
                     }
                 }
             }

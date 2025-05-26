@@ -1,6 +1,5 @@
 // app/api/auth/[...nextauth]/route.ts
 import NextAuth from "next-auth"
-import type { NextAuthConfig } from "next-auth"
 import type { Session } from "next-auth"
 import Credentials from "next-auth/providers/credentials"
 import { API_CONFIG } from '@/lib/api/config'
@@ -32,7 +31,7 @@ declare module "next-auth" {
   }
 }
 
-export const config = {
+const config = {
   secret: process.env.NEXTAUTH_SECRET,
   providers: [
     Credentials({
@@ -41,158 +40,192 @@ export const config = {
         password: { label: "Password", type: "password" },
         token: { label: "Token", type: "text" },
       },
-// In route.ts - add detailed logging in the authorize function
+      async authorize(credentials) {
+        console.log('=== NEXTAUTH AUTHORIZE START ===');
+        console.log('Environment check:', {
+          NEXT_PUBLIC_BACKEND_URL: process.env.NEXT_PUBLIC_BACKEND_URL,
+          NEXTAUTH_SECRET: !!process.env.NEXTAUTH_SECRET,
+          NODE_ENV: process.env.NODE_ENV,
+          NEXTAUTH_URL: process.env.NEXTAUTH_URL
+        });
+        console.log('Credentials received:', {
+          identifier: credentials?.identifier,
+          passwordProvided: !!credentials?.password,
+          tokenProvided: !!credentials?.token
+        });
 
-// In route.ts - modify the authorize function to add more detailed logging
-async authorize(credentials) {
-  // Special case for OAuth token handling
-  if (credentials?.identifier === 'oauth_token' && credentials?.token) {
-    return {
-      id: 'oauth-user',
-      email: 'oauth-user',
-      token: credentials.token,
-    };
-  }
-  
-  // Regular credentials login
-  try {
-    console.log('Attempting to authenticate with:', {
-      identifier: credentials?.identifier,
-      passwordProvided: !!credentials?.password
-    });
-    
-    const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL}${API_CONFIG.ENDPOINTS.AUTH.SIGNIN}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        identifier: credentials?.identifier,
-        password: credentials?.password,
-      }),
-    });
-    
-    // Log raw response status
-    console.log('Auth response status:', res.status);
-    
-    if (!res.ok) {
-      console.error('Auth failed with status:', res.status);
-      return null;
-    }
-    
-    // Get the raw response data
-    const userData = await res.json();
-    
-    // Log the complete structure - formatted for readability
-    console.log('RAW AUTH RESPONSE DATA:');
-    console.log(JSON.stringify(userData, null, 2));
-    
-    // Log direct properties at the top level for quick inspection
-    console.log('TOP LEVEL KEYS:', Object.keys(userData));
-    
-    // Check if user data is nested in a user property
-    if (userData.user) {
-      console.log('USER OBJECT KEYS:', Object.keys(userData.user));
-      console.log('USER DATA:', JSON.stringify(userData.user, null, 2));
-    }
-    
-    // Check if claims data exists
-    if (userData.claims) {
-      console.log('CLAIMS OBJECT KEYS:', Object.keys(userData.claims));
-      console.log('CLAIMS DATA:', JSON.stringify(userData.claims, null, 2));
-    }
-    
-    if (userData.token) {
-      console.log('TOKEN EXISTS:', !!userData.token);
-      console.log('TOKEN PREVIEW:', userData.token.substring(0, 20) + '...');
-      
-      // Try to decode the token to see what's inside
-      try {
-        // Split the token to get the payload part
-        const parts = userData.token.split('.');
-        if (parts.length === 3) {
-          // Decode the payload part (the middle part of the JWT)
-          const payload = JSON.parse(atob(parts[1]));
-          console.log('DECODED TOKEN PAYLOAD:');
-          console.log(JSON.stringify(payload, null, 2));
-          
-          // Log token expiration details if available
-          if (payload.exp) {
-            const expDate = new Date(payload.exp * 1000);
-            console.log('TOKEN EXPIRES:', expDate.toLocaleString());
-            console.log('EXPIRES IN:', Math.round((payload.exp * 1000 - Date.now()) / 1000 / 60), 'minutes');
-          }
+        // Special case for OAuth token handling
+        if (credentials?.identifier === 'oauth_token' && credentials?.token) {
+          console.log('OAuth token flow detected');
+          return {
+            id: 'oauth-user',
+            email: 'oauth-user',
+            token: credentials.token as string,
+          };
         }
-      } catch (e) {
-        console.error('Error decoding token:', e);
+        
+        // Regular credentials login
+        if (!credentials?.identifier || !credentials?.password) {
+          console.error('Missing credentials - identifier:', !!credentials?.identifier, 'password:', !!credentials?.password);
+          return null;
+        }
+
+        // Check if backend URL is configured
+        if (!process.env.NEXT_PUBLIC_BACKEND_URL) {
+          console.error('NEXT_PUBLIC_BACKEND_URL environment variable is not set');
+          return null;
+        }
+
+        try {
+          const backendUrl = `${process.env.NEXT_PUBLIC_BACKEND_URL}${API_CONFIG.ENDPOINTS.AUTH.SIGNIN}`;
+          console.log('Making request to:', backendUrl);
+          
+          const requestBody = {
+            identifier: credentials.identifier,
+            password: credentials.password,
+          };
+          console.log('Request body:', JSON.stringify(requestBody, null, 2));
+          
+          const res = await fetch(backendUrl, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify(requestBody),
+          });
+          
+          console.log('Backend response status:', res.status);
+          console.log('Backend response headers:', Object.fromEntries(res.headers.entries()));
+          
+          if (!res.ok) {
+            const errorText = await res.text();
+            console.error('Backend auth failed:', {
+              status: res.status,
+              statusText: res.statusText,
+              errorText: errorText
+            });
+            return null;
+          }
+          
+          const responseData = await res.json();
+          console.log('Backend response data:', JSON.stringify(responseData, null, 2));
+          
+          // Check if we have a token in the response
+          if (!responseData.token) {
+            console.error('No token in response. Response keys:', Object.keys(responseData));
+            return null;
+          }
+          
+          // Decode the JWT token to extract user information
+          let userInfo: Record<string, any> = {};
+          try {
+            const tokenParts = responseData.token.split('.');
+            if (tokenParts.length === 3) {
+              const payload = JSON.parse(atob(tokenParts[1]));
+              console.log('Decoded JWT payload:', JSON.stringify(payload, null, 2));
+              userInfo = payload;
+            } else {
+              console.warn('Token does not appear to be a valid JWT (wrong number of parts)');
+            }
+          } catch (decodeError) {
+            console.error('Error decoding JWT:', decodeError);
+          }
+          
+          // CRITICAL FIX: Always use userInfo.id for the UUID, ignore userInfo.sub if it's a username
+          console.log('=== DEBUGGING USER ID EXTRACTION ===');
+          console.log('userInfo.id (should be UUID):', userInfo.id);
+          console.log('userInfo.sub (might be username, ignore if not UUID):', userInfo.sub);
+          console.log('userInfo.username:', userInfo.username);
+          console.log('responseData.id:', responseData.id);
+          
+          // Always prioritize userInfo.id as it contains the actual UUID
+          const actualUserId = userInfo.id || responseData.id;
+          const username = userInfo.username || responseData.username;
+          const identifier = String(credentials.identifier || '');
+          
+          console.log('=== FINAL ID ASSIGNMENT ===');
+          console.log('actualUserId (UUID):', actualUserId);
+          console.log('username:', username);
+          
+          // Validate that we have a proper UUID
+          if (!actualUserId) {
+            console.error('=== CRITICAL: NO USER ID FOUND IN BACKEND RESPONSE ===');
+            console.error('Backend must provide user ID in JWT payload');
+            return null;
+          }
+          
+          // Validate UUID format (basic check)
+          const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+          if (!uuidRegex.test(actualUserId)) {
+            console.warn('User ID does not appear to be a valid UUID:', actualUserId);
+          }
+          
+          const user = {
+            // Use the UUID from the JWT payload as the primary identifier
+            id: actualUserId,
+            sub: actualUserId, // Use UUID for sub as well (not username)
+            username: username || (identifier.includes('@') ? '' : identifier),
+            email: userInfo.email || responseData.email || (identifier.includes('@') ? identifier : ''),
+            enterpriseId: userInfo.enterpriseId || responseData.enterpriseId,
+            token: responseData.token,
+            iat: userInfo.iat,
+            exp: userInfo.exp,
+          };
+          
+          console.log('=== FINAL USER OBJECT FOR NEXTAUTH ===');
+          console.log('user.id (UUID):', user.id);
+          console.log('user.sub (UUID):', user.sub);
+          console.log('user.username:', user.username);
+          console.log('user.email:', user.email);
+          console.log('user.enterpriseId:', user.enterpriseId);
+          
+          return user;
+          
+        } catch (error) {
+          console.error('Auth request error:', {
+            message: error instanceof Error ? error.message : 'Unknown error',
+            stack: error instanceof Error ? error.stack : undefined,
+            error: error
+          });
+          return null;
+        }
       }
-      
-      // Construct the return object with all possible data sources
-      const returnData = {
-        token: userData.token,
-        ...(userData.user || {}),    // If user data is in a nested 'user' object
-        ...(userData.claims || {}),  // If claims are in a nested 'claims' object
-        ...userData                  // If user data is at the top level
-      };
-      
-      // Log the final constructed user object
-      console.log('FINAL CONSTRUCTED USER DATA:');
-      console.log(JSON.stringify(returnData, null, 2));
-      
-      return returnData;
-    }
-  } catch (error) {
-    console.error('Auth error:', error);
-  }
-  return null;
-}
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
-      // When user signs in, copy all user data to token
+    async jwt({ token, user }: { token: any; user: any }) {
+      console.log('=== JWT CALLBACK ===');
+      
+      // When user signs in, copy user data to token
       if (user) {
-        console.log('Raw user data in JWT callback:', JSON.stringify(user, null, 2));
+        console.log('User data in JWT callback:', JSON.stringify(user, null, 2));
         
-        // Preserve the JWT token
+        // Store the access token
         token.accessToken = user.token;
         
-        // Extract user data from the token payload
-        try {
-          if (user.token) {
-            const parts = user.token.split('.');
-            if (parts.length === 3) {
-              const payload = JSON.parse(atob(parts[1]));
-              console.log('Decoded payload in JWT callback:', JSON.stringify(payload, null, 2));
-              
-              // Use the decoded JWT payload data instead of the top-level user object
-              token.sub = payload.sub;
-              token.id = payload.id;
-              token.username = payload.username;
-              token.email = payload.email;
-              token.enterpriseId = payload.enterpriseId;
-              token.iat = payload.iat;
-              token.exp = payload.exp;
-            }
-          }
-        } catch (error) {
-          console.error('Error decoding token in JWT callback:', error);
-          
-          // Fallback: use the user object directly if token decoding fails
-          token.sub = user.sub;
-          token.id = user.id;
-          token.username = user.username;
-          token.email = user.email;
-          token.enterpriseId = user.enterpriseId;
-          token.iat = user.iat;
-          token.exp = user.exp;
-        }
+        // CRITICAL: Use the UUID for both sub and id
+        token.sub = user.id; // This should be the UUID, not the username
+        token.id = user.id;   // This should be the UUID, not the username
+        token.username = user.username;
+        token.email = user.email;
+        token.enterpriseId = user.enterpriseId;
+        token.iat = user.iat;
+        token.exp = user.exp;
+        
+        console.log('=== JWT CALLBACK - TOKEN VALUES ===');
+        console.log('token.id (should be UUID):', token.id);
+        console.log('token.sub (should be UUID):', token.sub);
+        console.log('token.username (should be username):', token.username);
       }
       
-      console.log('Final token in JWT callback:', JSON.stringify(token, null, 2));
+      console.log('Final JWT token:', JSON.stringify(token, null, 2));
       return token;
     },
     
     async session({ session, token }: { session: Session, token: any }) {
-      console.log('Token data in session callback:', JSON.stringify(token, null, 2));
+      console.log('=== SESSION CALLBACK ===');
+      console.log('Token in session callback:', JSON.stringify(token, null, 2));
       
       // Copy token to session.accessToken
       session.accessToken = token.accessToken as string;
@@ -202,23 +235,31 @@ async authorize(credentials) {
         session.user = {};
       }
       
-      // Copy all user fields from token to session.user
-      session.user.sub = token.sub;
-      session.user.id = token.id;
+      // CRITICAL: Use token.id (UUID) for both id and sub in session
+      session.user.id = token.id;        // UUID from JWT
+      session.user.sub = token.id;       // Use UUID, not token.sub (which might be username)
       session.user.username = token.username;
       session.user.email = token.email;
       session.user.enterpriseId = token.enterpriseId;
       session.user.iat = token.iat;
       session.user.exp = token.exp;
       
-      console.log('Final session in callback:', JSON.stringify(session, null, 2));
+      console.log('=== SESSION CALLBACK - FINAL SESSION VALUES ===');
+      console.log('session.user.id (should be UUID):', session.user.id);
+      console.log('session.user.sub (should be UUID):', session.user.sub);
+      console.log('session.user.username (should be username):', session.user.username);
+      console.log('session.user.email:', session.user.email);
+      console.log('session.user.enterpriseId:', session.user.enterpriseId);
+      
+      console.log('Final session object:', JSON.stringify(session, null, 2));
       return session;
     },
   },
   pages: {
     signIn: '/login',
   },
-} satisfies NextAuthConfig
+  debug: process.env.NODE_ENV === 'development',
+}
 
 export const { handlers, auth, signIn, signOut } = NextAuth(config)
 export const { GET, POST } = handlers

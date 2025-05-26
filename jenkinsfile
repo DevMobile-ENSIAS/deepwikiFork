@@ -17,7 +17,6 @@ pipeline {
         stage('Build & Push Images') {
             steps {
                 script {
-                    // Split SERVICES into a List
                     def svcList = SERVICES.tokenize(',')
                     withCredentials([usernamePassword(
                         credentialsId: 'dockerhub-credentials',
@@ -26,10 +25,11 @@ pipeline {
                     )]) {
                         svcList.each { service ->
                             echo "Building and pushing ${service}"
+                            // Each bat invocation is a single shell session on Windows
                             bat """
-                                docker build -f Dockerfile -t %DOCKER_USER%/${service}:${IMAGE_TAG} . \\
-                                  && docker login -u %DOCKER_USER% -p %DOCKER_PASS% \\
-                                  && docker push %DOCKER_USER%/${service}:${IMAGE_TAG}
+                                docker build -f Dockerfile -t %DOCKER_USER%/${service}:%IMAGE_TAG% .
+                                docker login -u %DOCKER_USER% -p %DOCKER_PASS%
+                                docker push %DOCKER_USER%/${service}:%IMAGE_TAG%
                             """
                         }
                     }
@@ -40,7 +40,6 @@ pipeline {
         stage('Deploy to Kubernetes') {
             steps {
                 script {
-                    // Use your kubeconfig credential to drive kubectl
                     withCredentials([file(
                         credentialsId: 'kubeconfig-production',
                         variable: 'KUBECONFIG'

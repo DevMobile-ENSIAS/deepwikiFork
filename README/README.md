@@ -147,8 +147,7 @@ Terraform modules provisioning the GKE cluster, managed databases, Kafka/Zookeep
 
 ```bash
 # Clone the repository
-git clone https://github.com/shady0503/space-mission-control.git
-cd space-mission-control
+git clone (https://github.com/m-elhamlaoui/development-platform-latchina) .
 
 # 1. Local development with Docker Compose
 docker compose up --build -d

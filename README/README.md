@@ -30,7 +30,8 @@ A **cloud-native**, micro-services platform for end-to-end orchestration of spac
 
 A high-level view of all components—micro-services, databases, messaging and observability—deployed on Kubernetes, with CI/CD through Jenkins and IaC via Terraform:
 
-![Deployment Architecture Overview](deployment_architecture_overview.png)  
+![Architecture Overview](overview_structure.png)  
+![Deployment Architecture Overview](Deployment_Architecture_Overview.png)  
 *Figure 1: End-to-end topology across API Gateway, services, PostgreSQL, Kafka/Zookeeper, and LGTM stack.*
 
 ---
@@ -131,7 +132,7 @@ Core entities, enums and relationships across the micro-services:
 
 Declarative pipeline automates build, test, image release and Kubernetes rollout:
 
-![Jenkins CI/CD Pipeline](jenkins_pipeline.png)  
+![Jenkins CI/CD Pipeline](jenkins.jpeg)  
 *Figure 12: Jenkinsfile stages – Checkout → Build → Test → Dockerize → Push → `kubectl apply`.*
 
 ---
@@ -139,9 +140,6 @@ Declarative pipeline automates build, test, image release and Kubernetes rollout
 ## Infrastructure as Code with Terraform
 
 Terraform modules provisioning the GKE cluster, managed databases, Kafka/Zookeeper and LGTM components:
-
-![Terraform Infrastructure](terraform_structure.png)  
-*Figure 13: Terraform project layout – `modules/cluster`, `modules/database`, `modules/messaging`, `modules/observability`, with remote state.*
 
 ---
 
